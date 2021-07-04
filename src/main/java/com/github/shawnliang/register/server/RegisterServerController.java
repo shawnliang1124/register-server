@@ -30,6 +30,19 @@ public class RegisterServerController {
             serviceInstance.setServiceInstanceId(registerReq.getInstanceId());
             serviceInstance.setServiceName(registerReq.getServiceName());
 
+            // 记录心跳的发送次数
+            HeartBeatMessuredRate.getInstance().increase();
+
+            // 更新自我保护机制的阈值
+            synchronized (SelfProtectPolicy.class) {
+                SelfProtectPolicy selfProtectPolicy = SelfProtectPolicy.getInstance();
+                selfProtectPolicy.setExpectedHeartBeatRate(selfProtectPolicy.getExpectedHeartBeatRate() + 2);
+                selfProtectPolicy.setExpectedHeartBeatThreshold(
+                        (long) (selfProtectPolicy.getExpectedHeartBeatRate() *
+                                selfProtectPolicy.getHeartBeatThreshold())
+                );
+            }
+
             registerResp.setStatus(RegisterResp.SUCCESS);
         } catch (Exception e) {
             e.printStackTrace();
@@ -39,7 +52,8 @@ public class RegisterServerController {
     }
 
     /**
-     * 发送心跳请求
+     * client端向server端发送心跳请求
+     * 续约注册表的信息
      * @param heartBeatReq
      * @return
      */
@@ -53,6 +67,9 @@ public class RegisterServerController {
             Optional.ofNullable(serviceInstance)
                     .ifPresent(ServiceInstance::renew);
 
+            // 记录心跳的发送次数
+            HeartBeatMessuredRate.getInstance().increase();
+
             heartBeatResp.setStatus(HeartBeatResp.SUCCESS);
         } catch (Exception e) {
             e.printStackTrace();
@@ -60,6 +77,25 @@ public class RegisterServerController {
         }
 
         return heartBeatResp;
+    }
+
+    /**
+     * 服务下线
+     * @param serviceName
+     * @param instanceName
+     */
+    public synchronized void removeRegistry(String serviceName, String instanceName) {
+        registry.removeInstance(serviceName, instanceName);
+
+        // 更新自我保护机制的阈值
+        synchronized (SelfProtectPolicy.class) {
+            SelfProtectPolicy selfProtectPolicy = SelfProtectPolicy.getInstance();
+            selfProtectPolicy.setExpectedHeartBeatRate(selfProtectPolicy.getExpectedHeartBeatRate() - 2);
+            selfProtectPolicy.setExpectedHeartBeatThreshold(
+                    (long) (selfProtectPolicy.getExpectedHeartBeatRate() *
+                            selfProtectPolicy.getHeartBeatThreshold())
+            );
+        }
     }
 
 }
